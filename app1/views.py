@@ -5,22 +5,30 @@ from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 from django.views.generic import ListView
 from .forms import EmailPostForm, CommentForm
 from django.views.decorators.http import require_POST
+from taggit.models import Tag
+from django.db.models import Count
 
 
 
-def post_list(request):
-    object_list = Post.published.all()  # a list of the posts
-    paginator = Paginator(object_list, 2)  # 4 posts in each page
-    page = request.GET.get('page')
+def post_list(request, tag_slug=None):
+    post_list = Post.published.all()
+    tag = None
+    if tag_slug:
+        tag = get_object_or_404(Tag, slug=tag_slug)
+        post_list = post_list.filter(tags__in=[tag])
+    # Pagination with 3 posts per page
+    paginator = Paginator(post_list, 3)
+    page_number = request.GET.get('page', 1)
     try:
-        posts = paginator.page(page)
+        posts = paginator.page(page_number)
     except PageNotAnInteger:
-        # If page is not an integer deliver the first page
+        # If page_number is not an integer deliver the first page
         posts = paginator.page(1)
     except EmptyPage:
-        # If page is out of range deliver last page of results
+        # If page_number is out of range deliver last page of results
         posts = paginator.page(paginator.num_pages)
-    return render(request, 'app1/post/list.html', dict(page=page, posts=posts))
+    return render(request,
+                 'app1/post/list.html',{'posts': posts, 'tag': tag})
 
 
 def post_detail(request, year, month, day, post):
@@ -34,12 +42,10 @@ def post_detail(request, year, month, day, post):
     comments = post.comments.filter(active=True)
     # Form for users to comment
     form = CommentForm()
-
-    return render(request,
-                  'app1/post/detail.html',
-                  {'post': post,
-                   'comments': comments,
-                   'form': form})
+    post_tags_ids = post.tags.values_list('id', flat=True)
+    similar_posts = Post.published.filter(tags__in=post_tags_ids).exclude(id=post.id)
+    similar_posts = similar_posts.annotate(same_tags=Count('tags')).order_by('-same_tags', '-publish')[:4]
+    return render(request,'app1/post/detail.html',{'post': post, 'comments': comments, 'form': form,'similar_posts': similar_posts})
 
 
 class PostListView(ListView):
